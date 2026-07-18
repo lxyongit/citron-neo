@@ -64,23 +64,8 @@ class ProgressDialogFragment : DialogFragment() {
         binding.message.isSelected = true
         taskViewModel.isComplete.collect(viewLifecycleOwner) {
             if (it) {
-                dismiss()
-                when (val result = taskViewModel.result.value) {
-                    is String -> Toast.makeText(
-                        requireContext(),
-                        result,
-                        Toast.LENGTH_LONG
-                    ).show()
-
-                    is MessageDialogFragment -> result.show(
-                        requireActivity().supportFragmentManager,
-                        MessageDialogFragment.TAG
-                    )
-
-                    else -> {
-                        // Do nothing
-                    }
-                }
+                dismissSafely()
+                showResultSafely(taskViewModel.result.value)
                 taskViewModel.clear()
             }
         }
@@ -118,6 +103,39 @@ class ProgressDialogFragment : DialogFragment() {
             alertDialog.setTitle(getString(R.string.cancelling))
             binding.progressBar.isIndeterminate = true
             taskViewModel.setCancelled(true)
+        }
+    }
+
+    private fun dismissSafely() {
+        if (!isAdded) {
+            return
+        }
+
+        if (parentFragmentManager.isStateSaved) {
+            dismissAllowingStateLoss()
+        } else {
+            dismiss()
+        }
+    }
+
+    private fun showResultSafely(result: Any?) {
+        when (result) {
+            is String -> {
+                val appContext = context?.applicationContext ?: return
+                Toast.makeText(appContext, result, Toast.LENGTH_LONG).show()
+            }
+
+            is MessageDialogFragment -> {
+                val activity = activity ?: return
+                val fragmentManager = activity.supportFragmentManager
+                if (!fragmentManager.isStateSaved) {
+                    result.show(fragmentManager, MessageDialogFragment.TAG)
+                }
+            }
+
+            else -> {
+                // Do nothing
+            }
         }
     }
 

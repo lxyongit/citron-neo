@@ -8,6 +8,7 @@ import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.preference.PreferenceManager
+import java.io.File
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -107,12 +108,15 @@ class GamesViewModel : ViewModel() {
                                 return@forEach
                             }
 
-                            val gameExists =
+                            val gameExists = if (game.path.startsWith('/')) {
+                                File(game.path).exists()
+                            } else {
                                 DocumentFile.fromSingleUri(
                                     CitronApplication.appContext,
                                     Uri.parse(game.path)
-                                )?.exists()
-                            if (gameExists == true) {
+                                )?.exists() == true
+                            }
+                            if (gameExists) {
                                 deserializedGames.add(game)
                             }
                         }

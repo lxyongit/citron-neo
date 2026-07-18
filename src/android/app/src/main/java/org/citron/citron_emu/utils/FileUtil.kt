@@ -109,6 +109,19 @@ object FileUtil {
      * @return CheapDocument lists.
      */
     fun listFiles(uri: Uri): Array<MinimalDocumentFile> {
+        if (uri.scheme.isNullOrEmpty() || uri.scheme == "file") {
+            val nativePath = uri.path ?: uri.toString()
+            val files = File(nativePath).listFiles() ?: return emptyArray()
+            return files.map { file ->
+                val mimeType = if (file.isDirectory) {
+                    DocumentsContract.Document.MIME_TYPE_DIR
+                } else {
+                    APPLICATION_OCTET_STREAM
+                }
+                MinimalDocumentFile(file.name, mimeType, Uri.fromFile(file))
+            }.toTypedArray()
+        }
+
         val resolver = context.contentResolver
         val columns = arrayOf(
             DocumentsContract.Document.COLUMN_DOCUMENT_ID,
@@ -195,6 +208,10 @@ object FileUtil {
      * @return String display name
      */
     fun getFilename(uri: Uri): String {
+        if (uri.scheme.isNullOrEmpty() || uri.scheme == "file") {
+            return uri.lastPathSegment ?: uri.path?.substringAfterLast(File.separator) ?: ""
+        }
+
         val resolver = CitronApplication.appContext.contentResolver
         val columns = arrayOf(
             DocumentsContract.Document.COLUMN_DISPLAY_NAME

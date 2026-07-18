@@ -45,7 +45,7 @@ android {
 
     defaultConfig {
         // TODO If this is ever modified, change application_id in strings.xml
-        applicationId = "org.citron.citron_emu"
+        applicationId = "com.gzhuaiyun.citron"
         minSdk = 30
         //noinspection OldTargetApi
         targetSdk = 36
@@ -111,8 +111,8 @@ android {
             isDebuggable = true
             isMinifyEnabled = false
 
-            applicationIdSuffix = ".relWithDebInfo"
-            versionNameSuffix = "-relWithDebInfo"
+            // applicationIdSuffix = ".relWithDebInfo"
+            // versionNameSuffix = "-relWithDebInfo"
         }
 
         // Signed by debug key disallowing distribution on Play Store.
@@ -122,8 +122,8 @@ android {
             resValue("string", "app_name_suffixed", "citron-neo: The switch fell off Debug")
             isDebuggable = true
             isJniDebuggable = true
-            versionNameSuffix = "-debug"
-            applicationIdSuffix = ".debug"
+            // versionNameSuffix = "-debug"
+            // applicationIdSuffix = ".debug"
         }
     }
 

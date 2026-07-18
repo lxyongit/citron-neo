@@ -6,6 +6,7 @@ package org.citron.citron_emu.utils
 import android.content.SharedPreferences
 import android.net.Uri
 import androidx.preference.PreferenceManager
+import java.io.File
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.citron.citron_emu.NativeLibrary
@@ -44,8 +45,14 @@ object GameHelper {
 
         val badDirs = mutableListOf<Int>()
         gameDirs.forEachIndexed { index: Int, gameDir: GameDir ->
-            val gameDirUri = Uri.parse(gameDir.uriString)
-            val isValid = FileUtil.isTreeUriValid(gameDirUri)
+            val gameDirPath = gameDir.uriString
+            val isNativePath = DocumentsTree.isNativePath(gameDirPath)
+            val gameDirUri = if (isNativePath) Uri.fromFile(File(gameDirPath)) else Uri.parse(gameDirPath)
+            val isValid = if (isNativePath) {
+                File(gameDirPath).isDirectory
+            } else {
+                FileUtil.isTreeUriValid(gameDirUri)
+            }
             if (isValid) {
                 addGamesRecursive(
                     games,
@@ -108,7 +115,7 @@ object GameHelper {
     }
 
     fun getGame(uri: Uri, addedToLibrary: Boolean): Game? {
-        val filePath = uri.toString()
+        val filePath = if (uri.scheme == "file") uri.path ?: uri.toString() else uri.toString()
         if (!GameMetadata.getIsValid(filePath)) {
             return null
         }

@@ -11,6 +11,7 @@
 [submodule "dynarmic"]
 	path = externals/dynarmic
 	url = https://github.com/xinitrcn1/dynarmic.git
+	ignore = dirty
 [submodule "libusb"]
 	path = externals/libusb/libusb
 	url = https://github.com/libusb/libusb.git

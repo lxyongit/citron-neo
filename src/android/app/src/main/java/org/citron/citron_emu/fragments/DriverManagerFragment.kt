@@ -27,6 +27,7 @@ import org.citron.citron_emu.features.settings.model.StringSetting
 import org.citron.citron_emu.model.Driver.Companion.toDriver
 import org.citron.citron_emu.model.DriverViewModel
 import org.citron.citron_emu.model.HomeViewModel
+import org.citron.citron_emu.ui.main.MainActivity
 import org.citron.citron_emu.utils.FileUtil
 import org.citron.citron_emu.utils.GpuDriverHelper
 import org.citron.citron_emu.utils.NativeConfig
@@ -41,6 +42,7 @@ class DriverManagerFragment : Fragment() {
 
     private val homeViewModel: HomeViewModel by activityViewModels()
     private val driverViewModel: DriverViewModel by activityViewModels()
+    private lateinit var mainActivity: MainActivity
 
     private val args by navArgs<DriverManagerFragmentArgs>()
 
@@ -64,6 +66,7 @@ class DriverManagerFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
         homeViewModel.setNavigationVisibility(visible = false, animated = true)
         homeViewModel.setStatusBarShadeVisibility(visible = false)
+        mainActivity = requireActivity() as MainActivity
 
         driverViewModel.onOpenDriverManager(args.game)
         if (NativeConfig.isPerGameConfigLoaded()) {
@@ -97,7 +100,11 @@ class DriverManagerFragment : Fragment() {
         }
 
         binding.toolbarDrivers.setNavigationOnClickListener {
-            binding.root.findNavController().popBackStack()
+            if (mainActivity.shouldFinishOnDriverManagerExit()) {
+                requireActivity().finish()
+            } else {
+                binding.root.findNavController().popBackStack()
+            }
         }
 
         binding.buttonInstall.setOnClickListener {
@@ -113,6 +120,8 @@ class DriverManagerFragment : Fragment() {
         }
 
         setInsets()
+
+        driverViewModel.consumePendingExternalDriverInstallPath()?.let(::installExternalDriver)
     }
 
     override fun onDestroy() {
@@ -170,41 +179,88 @@ class DriverManagerFragment : Fragment() {
                 R.string.installing_driver,
                 false
             ) { _, _ ->
-                val driverPath =
-                    "${GpuDriverHelper.driverStoragePath}${FileUtil.getFilename(result)}"
-                val driverFile = File(driverPath)
-
-                // Ignore file exceptions when a user selects an invalid zip
-                try {
-                    if (!GpuDriverHelper.copyDriverToInternalStorage(result)) {
-                        throw IOException("Driver failed validation!")
-                    }
-                } catch (_: IOException) {
-                    if (driverFile.exists()) {
-                        driverFile.delete()
-                    }
-                    return@newInstance getString(R.string.select_gpu_driver_error)
-                }
-
-                val driverData = GpuDriverHelper.getMetadataFromZip(driverFile)
-                val driverInList =
-                    driverViewModel.driverData.firstOrNull { it.second == driverData }
-                if (driverInList != null) {
-                    return@newInstance getString(R.string.driver_already_installed)
-                } else {
-                    driverViewModel.onDriverAdded(Pair(driverPath, driverData))
-                    withContext(Dispatchers.Main) {
-                        if (_binding != null) {
-                            val adapter = binding.listDrivers.adapter as DriverAdapter
-                            adapter.addItem(driverData.toDriver())
-                            adapter.selectItem(adapter.currentList.indices.last)
-                            driverViewModel.showClearButton(!StringSetting.DRIVER_PATH.global)
-                            binding.listDrivers
-                                .smoothScrollToPosition(adapter.currentList.indices.last)
-                        }
-                    }
-                }
-                return@newInstance Any()
+                return@newInstance installDriverFromDocument(result)
             }.show(childFragmentManager, ProgressDialogFragment.TAG)
         }
+
+    private fun installExternalDriver(driverPath: String) {
+        ProgressDialogFragment.newInstance(
+            requireActivity(),
+            R.string.installing_driver,
+            false
+        ) { _, _ ->
+            return@newInstance installDriverFromFile(File(driverPath), copyIntoStorage = true)
+        }.show(childFragmentManager, ProgressDialogFragment.TAG)
+    }
+
+    private suspend fun installDriverFromDocument(result: android.net.Uri): Any {
+        val driverPath =
+            "${GpuDriverHelper.driverStoragePath}${FileUtil.getFilename(result)}"
+        val driverFile = File(driverPath)
+
+        try {
+            if (!GpuDriverHelper.copyDriverToInternalStorage(result)) {
+                throw IOException("Driver failed validation!")
+            }
+        } catch (_: IOException) {
+            if (driverFile.exists()) {
+                driverFile.delete()
+            }
+            return getString(R.string.select_gpu_driver_error)
+        }
+
+        return installDriverEntry(driverFile)
+    }
+
+    private suspend fun installDriverFromFile(driverFile: File, copyIntoStorage: Boolean): Any {
+        if (!driverFile.exists() || !driverFile.isFile) {
+            return getString(R.string.select_gpu_driver_error)
+        }
+
+        val managedDriverFile = if (copyIntoStorage) {
+            val copiedDriverFile = File(
+                GpuDriverHelper.driverStoragePath,
+                driverFile.name,
+            )
+            try {
+                driverFile.copyTo(copiedDriverFile, overwrite = true)
+            } catch (_: IOException) {
+                return getString(R.string.select_gpu_driver_error)
+            }
+            copiedDriverFile
+        } else {
+            driverFile
+        }
+
+        val metadata = GpuDriverHelper.getMetadataFromZip(managedDriverFile)
+        if (metadata.name == null || metadata.minApi > android.os.Build.VERSION.SDK_INT) {
+            if (copyIntoStorage && managedDriverFile.exists()) {
+                managedDriverFile.delete()
+            }
+            return getString(R.string.select_gpu_driver_error)
+        }
+
+        return installDriverEntry(managedDriverFile)
+    }
+
+    private suspend fun installDriverEntry(driverFile: File): Any {
+        val driverData = GpuDriverHelper.getMetadataFromZip(driverFile)
+        val driverInList =
+            driverViewModel.driverData.firstOrNull { it.second == driverData }
+        if (driverInList != null) {
+            return getString(R.string.driver_already_installed)
+        }
+
+        driverViewModel.onDriverAdded(Pair(driverFile.path, driverData))
+        withContext(Dispatchers.Main) {
+            if (_binding != null) {
+                val adapter = binding.listDrivers.adapter as DriverAdapter
+                adapter.addItem(driverData.toDriver())
+                adapter.selectItem(adapter.currentList.indices.last)
+                driverViewModel.showClearButton(!StringSetting.DRIVER_PATH.global)
+                binding.listDrivers.smoothScrollToPosition(adapter.currentList.indices.last)
+            }
+        }
+        return Any()
+    }
 }

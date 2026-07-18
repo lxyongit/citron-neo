@@ -51,6 +51,7 @@ class DriverViewModel : ViewModel() {
     val showClearButton = _showClearButton.asStateFlow()
 
     private val driversToDelete = mutableListOf<String>()
+    private var pendingExternalDriverInstallPath: String? = null
 
     init {
         updateDriverList()
@@ -114,6 +115,16 @@ class DriverViewModel : ViewModel() {
         }
         driverData.add(driver)
         onDriverSelected(driverData.size)
+    }
+
+    fun setPendingExternalDriverInstallPath(driverPath: String?) {
+        pendingExternalDriverInstallPath = driverPath?.takeIf { it.isNotBlank() }
+    }
+
+    fun consumePendingExternalDriverInstallPath(): String? {
+        val driverPath = pendingExternalDriverInstallPath
+        pendingExternalDriverInstallPath = null
+        return driverPath
     }
 
     fun onCloseDriverManager(game: Game?) {
