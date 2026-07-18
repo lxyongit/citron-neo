@@ -770,6 +770,7 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
     }
 
     private fun updateScreenLayout() {
+        val currentBinding = _binding ?: return
         val verticalAlignment =
             EmulationVerticalAlignment.from(IntSetting.VERTICAL_ALIGNMENT.getInt())
         val aspectRatio = when (IntSetting.RENDERER_ASPECT_RATIO.getInt()) {
@@ -783,35 +784,37 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
         }
         when (verticalAlignment) {
             EmulationVerticalAlignment.Top -> {
-                binding.surfaceEmulation.setAspectRatio(aspectRatio)
+                currentBinding.surfaceEmulation.setAspectRatio(aspectRatio)
                 val params = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 )
                 params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                binding.surfaceEmulation.layoutParams = params
+                currentBinding.surfaceEmulation.layoutParams = params
             }
 
             EmulationVerticalAlignment.Center -> {
-                binding.surfaceEmulation.setAspectRatio(null)
-                binding.surfaceEmulation.updateLayoutParams {
+                currentBinding.surfaceEmulation.setAspectRatio(null)
+                currentBinding.surfaceEmulation.updateLayoutParams {
                     width = ViewGroup.LayoutParams.MATCH_PARENT
                     height = ViewGroup.LayoutParams.MATCH_PARENT
                 }
             }
 
             EmulationVerticalAlignment.Bottom -> {
-                binding.surfaceEmulation.setAspectRatio(aspectRatio)
+                currentBinding.surfaceEmulation.setAspectRatio(aspectRatio)
                 val params =
                     FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT
                     )
                 params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                binding.surfaceEmulation.layoutParams = params
+                currentBinding.surfaceEmulation.layoutParams = params
             }
         }
-        emulationState.updateSurface()
+        if (this::emulationState.isInitialized) {
+            emulationState.updateSurface()
+        }
         emulationActivity?.buildPictureInPictureParams()
         updateOrientation()
     }

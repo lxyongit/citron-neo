@@ -53,6 +53,7 @@ import java.util.zip.ZipInputStream
 
 class MainActivity : AppCompatActivity(), ThemeProvider {
     private lateinit var binding: ActivityMainBinding
+    private lateinit var navController: NavController
 
     private val homeViewModel: HomeViewModel by viewModels()
     private val gamesViewModel: GamesViewModel by viewModels()
@@ -64,6 +65,10 @@ class MainActivity : AppCompatActivity(), ThemeProvider {
 
     private val CHECKED_DECRYPTION = "CheckedDecryption"
     private var checkedDecryption = false
+    private var pendingLaunchForwarded = false
+    private var finishOnHomeSettingsExit = false
+    private var finishOnGamePropertiesExit = false
+    private var finishOnDriverManagerExit = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
@@ -124,7 +129,8 @@ class MainActivity : AppCompatActivity(), ThemeProvider {
 
         val navHostFragment =
             supportFragmentManager.findFragmentById(R.id.fragment_container) as NavHostFragment
-        setUpNavigation(navHostFragment.navController)
+        navController = navHostFragment.navController
+        setUpNavigation(navController)
         (binding.navigationView as NavigationBarView).setOnItemReselectedListener {
             when (it.itemId) {
                 R.id.gamesFragment -> gamesViewModel.setShouldScrollToTop(true)
@@ -134,7 +140,7 @@ class MainActivity : AppCompatActivity(), ThemeProvider {
                         null,
                         Settings.MenuTag.SECTION_ROOT
                     )
-                    navHostFragment.navController.navigate(action)
+                    navController.navigate(action)
                 }
             }
         }
@@ -160,6 +166,7 @@ class MainActivity : AppCompatActivity(), ThemeProvider {
         }
 
         setInsets()
+        processPendingMainActivityIntent()
     }
 
     private fun checkKeys() {
@@ -177,22 +184,163 @@ class MainActivity : AppCompatActivity(), ThemeProvider {
         outState.putBoolean(CHECKED_DECRYPTION, checkedDecryption)
     }
 
-    fun finishSetup(navController: NavController) {
+    fun finishSetup(
+        navController: NavController,
+        skipPendingLaunchFirmwareCheck: Boolean = false
+    ) {
         navController.navigate(R.id.action_firstTimeSetupFragment_to_gamesFragment)
         (binding.navigationView as NavigationBarView).setupWithNavController(navController)
         showNavigation(visible = true, animated = true)
+
+        binding.root.post {
+            processPendingMainActivityIntent(skipPendingLaunchFirmwareCheck)
+        }
     }
 
     private fun setUpNavigation(navController: NavController) {
         val firstTimeSetup = PreferenceManager.getDefaultSharedPreferences(applicationContext)
             .getBoolean(Settings.PREF_FIRST_APP_LAUNCH, true)
+        val shouldBypassSetupForIntent =
+            hasPendingEmulationLaunchIntent() && NativeLibrary.isFirmwareAvailable()
 
-        if (firstTimeSetup && !homeViewModel.navigatedToSetup) {
+        if (firstTimeSetup && !shouldBypassSetupForIntent && !homeViewModel.navigatedToSetup) {
             navController.navigate(R.id.firstTimeSetupFragment)
             homeViewModel.navigatedToSetup = true
         } else {
             (binding.navigationView as NavigationBarView).setupWithNavController(navController)
         }
+    }
+
+    fun hasPendingEmulationLaunchIntent(): Boolean {
+        if (pendingLaunchForwarded) {
+            return false
+        }
+
+        return intent.data != null
+    }
+
+    private fun buildPendingEmulationLaunchIntent(): Intent? {
+        if (!hasPendingEmulationLaunchIntent()) {
+            return null
+        }
+
+        return Intent(intent).apply {
+            setClass(this@MainActivity, org.citron.citron_emu.activities.EmulationActivity::class.java)
+        }
+    }
+
+    private fun maybeForwardPendingEmulationLaunch(skipFirmwareCheck: Boolean = false): Boolean {
+        if (!skipFirmwareCheck && !NativeLibrary.isFirmwareAvailable()) {
+            return false
+        }
+
+        val pendingLaunchIntent = buildPendingEmulationLaunchIntent() ?: return false
+        pendingLaunchForwarded = true
+        setIntent(Intent(this, MainActivity::class.java))
+        startActivity(pendingLaunchIntent)
+        return true
+    }
+
+    private fun hasPendingHomeSettingsIntent(): Boolean {
+        return intent.action == HomeNavigationIntents.HOME_SETTINGS_ACTION
+    }
+
+    private fun hasPendingDriverInstallIntent(): Boolean {
+        return intent.action == GpuInstallIntents.GPU_INSTALL_ACTION &&
+            !intent.getStringExtra(GpuInstallIntents.EXTRA_DRIVER_PATH).isNullOrBlank()
+    }
+
+    private fun maybeNavigateToDriverManagerForGpuInstall(): Boolean {
+        if (!hasPendingDriverInstallIntent() || isFirstTimeSetupPending()) {
+            return false
+        }
+
+        val driverPath = intent.getStringExtra(GpuInstallIntents.EXTRA_DRIVER_PATH) ?: return false
+        finishOnDriverManagerExit = true
+        driverViewModel.setPendingExternalDriverInstallPath(driverPath)
+
+        if (navController.currentDestination?.id != R.id.driverManagerFragment) {
+            navController.navigate(R.id.driverManagerFragment)
+        }
+
+        setIntent(Intent(this, MainActivity::class.java))
+        return true
+    }
+
+    private fun hasPendingGamePropertiesIntent(): Boolean {
+        return intent.action == GamePropertiesIntents.GAME_SETTINGS_ACTION &&
+            !intent.getStringExtra(GamePropertiesIntents.EXTRA_GAME_PATH).isNullOrBlank()
+    }
+
+    private fun maybeNavigateToGameProperties(): Boolean {
+        if (!hasPendingGamePropertiesIntent() || isFirstTimeSetupPending()) {
+            return false
+        }
+
+        val gamePath = intent.getStringExtra(GamePropertiesIntents.EXTRA_GAME_PATH) ?: return false
+        val game = getGameFromPath(gamePath) ?: return false
+
+        finishOnGamePropertiesExit = true
+        val action = HomeNavigationDirections.actionGlobalPerGamePropertiesFragment(game)
+        navController.navigate(action)
+        setIntent(Intent(this, MainActivity::class.java))
+        return true
+    }
+
+    private fun maybeNavigateToHomeSettings(): Boolean {
+        if (!hasPendingHomeSettingsIntent() || isFirstTimeSetupPending()) {
+            return false
+        }
+
+        finishOnHomeSettingsExit = true
+        if (navController.currentDestination?.id != R.id.homeSettingsFragment) {
+            navController.navigate(R.id.homeSettingsFragment)
+        }
+        setIntent(Intent(this, MainActivity::class.java))
+        return true
+    }
+
+    private fun processPendingMainActivityIntent(skipPendingLaunchFirmwareCheck: Boolean = false) {
+        if (!maybeForwardPendingEmulationLaunch(skipPendingLaunchFirmwareCheck)) {
+            if (!maybeNavigateToDriverManagerForGpuInstall()) {
+                if (!maybeNavigateToGameProperties()) {
+                    maybeNavigateToHomeSettings()
+                }
+            }
+        }
+    }
+
+    private fun isFirstTimeSetupPending(): Boolean {
+        return PreferenceManager.getDefaultSharedPreferences(applicationContext)
+            .getBoolean(Settings.PREF_FIRST_APP_LAUNCH, true)
+    }
+
+    private fun getGameFromPath(gamePath: String): org.citron.citron_emu.model.Game? {
+        val uri = if (gamePath.startsWith("content://")) {
+            Uri.parse(gamePath)
+        } else {
+            Uri.fromFile(File(gamePath))
+        }
+        return GameHelper.getGame(uri, false)
+    }
+
+    fun shouldFinishOnHomeSettingsExit(): Boolean {
+        return finishOnHomeSettingsExit
+    }
+
+    fun shouldFinishOnGamePropertiesExit(): Boolean {
+        return finishOnGamePropertiesExit
+    }
+
+    fun shouldFinishOnDriverManagerExit(): Boolean {
+        return finishOnDriverManagerExit
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        pendingLaunchForwarded = false
+        setIntent(intent)
+        processPendingMainActivityIntent()
     }
 
     private fun showNavigation(visible: Boolean, animated: Boolean) {

@@ -41,6 +41,7 @@ import org.citron.citron_emu.model.HomeViewModel
 import org.citron.citron_emu.model.InstallableProperty
 import org.citron.citron_emu.model.SubmenuProperty
 import org.citron.citron_emu.model.TaskState
+import org.citron.citron_emu.ui.main.MainActivity
 import org.citron.citron_emu.utils.DirectoryInitialization
 import org.citron.citron_emu.utils.FileUtil
 import org.citron.citron_emu.utils.GameIconUtils
@@ -59,6 +60,7 @@ class GamePropertiesFragment : Fragment() {
     private val homeViewModel: HomeViewModel by activityViewModels()
     private val gamesViewModel: GamesViewModel by activityViewModels()
     private val driverViewModel: DriverViewModel by activityViewModels()
+    private lateinit var mainActivity: MainActivity
 
     private val args by navArgs<GamePropertiesFragmentArgs>()
 
@@ -82,9 +84,14 @@ class GamePropertiesFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
         homeViewModel.setNavigationVisibility(visible = false, animated = true)
         homeViewModel.setStatusBarShadeVisibility(true)
+        mainActivity = requireActivity() as MainActivity
 
         binding.buttonBack.setOnClickListener {
-            view.findNavController().popBackStack()
+            if (mainActivity.shouldFinishOnGamePropertiesExit()) {
+                requireActivity().finish()
+            } else {
+                view.findNavController().popBackStack()
+            }
         }
 
         val shortcutManager = requireActivity().getSystemService(ShortcutManager::class.java)

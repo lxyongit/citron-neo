@@ -16,6 +16,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.findNavController
 import androidx.preference.PreferenceManager
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -97,10 +98,14 @@ class GameAdapter(private val activity: AppCompatActivity, private var tilesMode
     }
 
     private fun handleGameClick(game: Game) {
-        val gameExists = DocumentFile.fromSingleUri(
-            CitronApplication.appContext,
-            Uri.parse(game.path)
-        )?.exists() == true
+        val gameExists = if (game.path.startsWith('/')) {
+            File(game.path).exists()
+        } else {
+            DocumentFile.fromSingleUri(
+                CitronApplication.appContext,
+                Uri.parse(game.path)
+            )?.exists() == true
+        }
         if (!gameExists) {
             Toast.makeText(
                 CitronApplication.appContext,

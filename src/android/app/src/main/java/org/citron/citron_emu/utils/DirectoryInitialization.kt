@@ -4,6 +4,7 @@
 package org.citron.citron_emu.utils
 
 import androidx.preference.PreferenceManager
+import java.io.File
 import java.io.IOException
 import org.citron.citron_emu.NativeLibrary
 import org.citron.citron_emu.CitronApplication
@@ -16,6 +17,8 @@ import org.citron.citron_emu.overlay.model.OverlayLayout
 import org.citron.citron_emu.utils.PreferenceUtil.migratePreference
 
 object DirectoryInitialization {
+    const val USER_ROOT_DIRECTORY = "/storage/emulated/0/rwEmulator/system/citron-neo"
+
     private var userPath: String? = null
 
     var areDirectoriesReady: Boolean = false
@@ -39,7 +42,9 @@ object DirectoryInitialization {
 
     private fun initializeInternalStorage() {
         try {
-            userPath = CitronApplication.appContext.getExternalFilesDir(null)!!.canonicalPath
+            val userDirectory = File(USER_ROOT_DIRECTORY)
+            userDirectory.mkdirs()
+            userPath = userDirectory.canonicalPath
             NativeLibrary.setAppDirectory(userPath!!)
         } catch (e: IOException) {
             e.printStackTrace()

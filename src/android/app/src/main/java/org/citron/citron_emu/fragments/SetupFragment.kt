@@ -7,6 +7,8 @@ import android.Manifest
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings as AndroidSettings
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -16,25 +18,31 @@ import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
 import androidx.core.view.updatePadding
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
+import androidx.lifecycle.Lifecycle
 import androidx.navigation.findNavController
 import androidx.preference.PreferenceManager
 import androidx.viewpager2.widget.ViewPager2.OnPageChangeCallback
 import com.google.android.material.transition.MaterialFadeThrough
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.citron.citron_emu.NativeLibrary
-import java.io.File
 import org.citron.citron_emu.R
 import org.citron.citron_emu.CitronApplication
 import org.citron.citron_emu.adapters.SetupAdapter
 import org.citron.citron_emu.databinding.FragmentSetupBinding
 import org.citron.citron_emu.features.settings.model.BooleanSetting
+import org.citron.citron_emu.features.settings.model.IntSetting
 import org.citron.citron_emu.features.settings.model.Settings
+import org.citron.citron_emu.model.GameDir
+import org.citron.citron_emu.model.GamesViewModel
 import org.citron.citron_emu.model.HomeViewModel
 import org.citron.citron_emu.model.SetupCallback
 import org.citron.citron_emu.model.SetupPage
@@ -42,25 +50,39 @@ import org.citron.citron_emu.model.StepState
 import org.citron.citron_emu.ui.main.MainActivity
 import org.citron.citron_emu.utils.DirectoryInitialization
 import org.citron.citron_emu.utils.InputHandler
+import org.citron.citron_emu.utils.FileUtil
+import org.citron.citron_emu.utils.Log
 import org.citron.citron_emu.utils.NativeConfig
 import org.citron.citron_emu.utils.ViewUtils
 import org.citron.citron_emu.utils.ViewUtils.setVisible
 import org.citron.citron_emu.utils.collect
+import java.io.File
 
 class SetupFragment : Fragment() {
     private var _binding: FragmentSetupBinding? = null
     private val binding get() = _binding!!
 
     private val homeViewModel: HomeViewModel by activityViewModels()
+    private val gamesViewModel: GamesViewModel by activityViewModels()
 
     private lateinit var mainActivity: MainActivity
 
     private lateinit var hasBeenWarned: BooleanArray
+    private lateinit var pageButtonCallback: SetupCallback
+    private var autoProvisionRunning = false
+    private var autoProvisionedFirmwareReady = false
 
     companion object {
         const val KEY_NEXT_VISIBILITY = "NextButtonVisibility"
         const val KEY_BACK_VISIBILITY = "BackButtonVisibility"
         const val KEY_HAS_BEEN_WARNED = "HasBeenWarned"
+
+        private const val DEFAULT_GAMES_DIRECTORY = "/storage/emulated/0/rwEmulator/roms/switch"
+        private const val ASSET_PROD_KEYS = "prod.keys"
+        private const val ASSET_TITLE_KEYS = "title.keys"
+        private const val ASSET_FIRMWARE = "firmware.zip"
+        private const val DEFAULT_REGION_CHINA = 4
+        private const val DEFAULT_LANGUAGE_SIMPLIFIED_CHINESE = 15
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -144,6 +166,34 @@ class SetupFragment : Fragment() {
                 )
             }
 
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                add(
+                    SetupPage(
+                        R.drawable.ic_folder_open,
+                        R.string.all_files_access,
+                        R.string.all_files_access_description,
+                        0,
+                        true,
+                        R.string.give_permission,
+                        {
+                            pageButtonCallback = it
+                            requestAllFilesPermission()
+                        },
+                        true,
+                        R.string.permissions,
+                        R.string.all_files_permission_required,
+                        0,
+                        {
+                            if (hasAllFilesPermission()) {
+                                StepState.COMPLETE
+                            } else {
+                                StepState.INCOMPLETE
+                            }
+                        }
+                    )
+                )
+            }
+
             add(
                 SetupPage(
                     R.drawable.ic_key,
@@ -216,7 +266,17 @@ class SetupFragment : Fragment() {
         homeViewModel.gamesDirSelected.collect(
             viewLifecycleOwner,
             resetState = { homeViewModel.setGamesDirSelected(false) }
-        ) { if (it) gamesDirCallback.onStepCompleted() }
+        ) {
+            if (!it) {
+                return@collect
+            }
+
+            if (::gamesDirCallback.isInitialized) {
+                gamesDirCallback.onStepCompleted()
+            } else {
+                checkForButtonState()
+            }
+        }
 
         binding.viewPager2.apply {
             adapter = SetupAdapter(requireActivity() as AppCompatActivity, pages)
@@ -249,6 +309,12 @@ class SetupFragment : Fragment() {
         binding.buttonNext.setOnClickListener {
             val index = binding.viewPager2.currentItem
             val currentPage = pages[index]
+
+            val isFinalRequiredSetupPage = index == pages.lastIndex - 1
+            if (isFinalRequiredSetupPage) {
+                finishSetup()
+                return@setOnClickListener
+            }
 
             // Checks if the user has completed the task on the current page
             if (currentPage.hasWarning) {
@@ -284,11 +350,18 @@ class SetupFragment : Fragment() {
         }
 
         setInsets()
+        triggerAutoProvisionIfNeeded()
     }
 
     override fun onStop() {
         super.onStop()
         NativeConfig.saveGlobalConfig()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        triggerAutoProvisionIfNeeded()
+        checkForButtonState()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -311,7 +384,7 @@ class SetupFragment : Fragment() {
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
             if (it) {
-                notificationCallback.onStepCompleted()
+                checkForButtonState()
             }
 
             if (!it &&
@@ -324,6 +397,14 @@ class SetupFragment : Fragment() {
             }
         }
 
+    private val allFilesPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            checkForButtonState()
+            if (hasStoragePermissionForAutoProvision()) {
+                triggerAutoProvisionIfNeeded()
+            }
+        }
+
     private lateinit var keyCallback: SetupCallback
 
     val getProdKey =
@@ -331,7 +412,7 @@ class SetupFragment : Fragment() {
             if (result != null) {
                 mainActivity.processKey(result)
                 if (NativeLibrary.areKeysPresent()) {
-                    keyCallback.onStepCompleted()
+                    checkForButtonState()
                 }
             }
         }
@@ -357,7 +438,204 @@ class SetupFragment : Fragment() {
         PreferenceManager.getDefaultSharedPreferences(CitronApplication.appContext).edit()
             .putBoolean(Settings.PREF_FIRST_APP_LAUNCH, false)
             .apply()
-        mainActivity.finishSetup(binding.root.findNavController())
+        gamesViewModel.reloadGames(directoriesChanged = true, firstStartup = false)
+        mainActivity.finishSetup(
+            binding.root.findNavController(),
+            skipPendingLaunchFirmwareCheck = autoProvisionedFirmwareReady
+        )
+    }
+
+    private fun checkForButtonState() {
+        if (!isAdded || _binding == null) {
+            return
+        }
+
+        val page = (binding.viewPager2.adapter as? SetupAdapter)?.currentList?.getOrNull(binding.viewPager2.currentItem)
+            ?: return
+        if (::pageButtonCallback.isInitialized && page.stepCompleted.invoke() == StepState.COMPLETE) {
+            pageButtonCallback.onStepCompleted()
+        }
+
+        if (canAutoFinishSetup()) {
+            finishSetup()
+        }
+    }
+
+    private fun hasAllFilesPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            true
+        }
+    }
+
+    private fun requestAllFilesPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !hasAllFilesPermission()) {
+            val intent = Intent(AndroidSettings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+            intent.data = "package:${requireContext().packageName}".toUri()
+            allFilesPermissionLauncher.launch(intent)
+            return
+        }
+
+        checkForButtonState()
+    }
+
+    private fun triggerAutoProvisionIfNeeded() {
+        if (!hasStoragePermissionForAutoProvision()) {
+            return
+        }
+
+        if (!isAdded || autoProvisionRunning || !needsAutoProvision()) {
+            return
+        }
+
+        autoProvisionRunning = true
+        ProgressDialogFragment.newInstance(
+            requireActivity(),
+            R.string.loading,
+            false
+        ) { _, messageCallback ->
+            try {
+                messageCallback.invoke(getString(R.string.installing))
+                autoInstallKeysFromAssetsIfNeeded()
+                messageCallback.invoke(getString(R.string.firmware_installing))
+                autoInstallFirmwareFromAssetsIfNeeded()
+                messageCallback.invoke(getString(R.string.add_games))
+                autoAddDefaultGamesDirectoryIfNeeded()
+            } finally {
+                autoProvisionRunning = false
+                withContext(Dispatchers.Main) {
+                    if (isAdded &&
+                        lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) &&
+                        !parentFragmentManager.isStateSaved
+                    ) {
+                        checkForButtonState()
+                    }
+                }
+            }
+            Any()
+        }.show(childFragmentManager, ProgressDialogFragment.TAG)
+    }
+
+    private fun hasStoragePermissionForAutoProvision(): Boolean {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.R || hasAllFilesPermission()
+    }
+
+    private fun canAutoFinishSetup(): Boolean {
+        val userDir = DirectoryInitialization.userDirectory ?: return false
+        val keysInstalled = File("$userDir/keys/prod.keys").exists() && NativeLibrary.areKeysPresent()
+        val firmwareInstalled = autoProvisionedFirmwareReady || NativeLibrary.isFirmwareAvailable()
+        val gameDirConfigured = NativeConfig.getGameDirs().isNotEmpty()
+        val hasPendingGameLaunch = mainActivity.hasPendingEmulationLaunchIntent()
+
+        return isAdded && _binding != null &&
+            hasStoragePermissionForAutoProvision() &&
+            keysInstalled &&
+            firmwareInstalled &&
+            (gameDirConfigured || hasPendingGameLaunch)
+    }
+
+    private fun needsAutoProvision(): Boolean {
+        val userDir = DirectoryInitialization.userDirectory ?: return false
+        val keysInstalled = File("$userDir/keys/prod.keys").exists() && NativeLibrary.areKeysPresent()
+        val firmwareInstalled = autoProvisionedFirmwareReady || NativeLibrary.isFirmwareAvailable()
+        val gameDirConfigured = NativeConfig.getGameDirs().isNotEmpty()
+        return !keysInstalled || !firmwareInstalled || !gameDirConfigured
+    }
+
+    private fun autoInstallKeysFromAssetsIfNeeded() {
+        val userDir = DirectoryInitialization.userDirectory ?: return
+        val installedProdKeys = File("$userDir/keys/prod.keys")
+        if (installedProdKeys.exists() && NativeLibrary.areKeysPresent()) {
+            return
+        }
+
+        val appContext = CitronApplication.appContext
+        val keysDir = File("$userDir/keys")
+        keysDir.mkdirs()
+
+        try {
+            appContext.assets.open(ASSET_PROD_KEYS).use { input ->
+                File(keysDir, ASSET_PROD_KEYS).outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            try {
+                appContext.assets.open(ASSET_TITLE_KEYS).use { input ->
+                    File(keysDir, ASSET_TITLE_KEYS).outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            } catch (_: Exception) {
+            }
+            NativeLibrary.reloadKeys()
+        } catch (e: Exception) {
+            Log.warning("[SetupFragment] Auto key installation failed: ${e.message}")
+        }
+    }
+
+    private fun autoInstallFirmwareFromAssetsIfNeeded() {
+        if (NativeLibrary.isFirmwareAvailable()) {
+            return
+        }
+
+        val appContext = CitronApplication.appContext
+        val cacheDir = appContext.cacheDir
+        val firmwareZip = File(cacheDir, ASSET_FIRMWARE)
+        val cacheFirmwareDir = File(cacheDir, "registered_auto")
+        val firmwarePath = File(DirectoryInitialization.userDirectory + "/nand/system/Contents/registered/")
+
+        try {
+            appContext.assets.open(ASSET_FIRMWARE).use { input ->
+                firmwareZip.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+
+            FileUtil.unzipToInternalStorage(firmwareZip.absolutePath, cacheFirmwareDir)
+            val unfilteredNumOfFiles = cacheFirmwareDir.list()?.size ?: -1
+            val filteredNumOfFiles = cacheFirmwareDir.list { _, fileName -> fileName.endsWith(".nca") }?.size ?: -2
+
+            if (unfilteredNumOfFiles == filteredNumOfFiles && filteredNumOfFiles > 0) {
+                firmwarePath.deleteRecursively()
+                cacheFirmwareDir.copyRecursively(firmwarePath, overwrite = true)
+                NativeLibrary.initializeSystem(true)
+                applyDefaultLocaleAfterFirmwareInstall()
+                autoProvisionedFirmwareReady = true
+                homeViewModel.setCheckKeys(true)
+            }
+        } catch (e: Exception) {
+            Log.warning("[SetupFragment] Auto firmware installation failed: ${e.message}")
+        } finally {
+            cacheFirmwareDir.deleteRecursively()
+            firmwareZip.delete()
+        }
+    }
+
+    private suspend fun autoAddDefaultGamesDirectoryIfNeeded() {
+        if (NativeConfig.getGameDirs().isNotEmpty()) {
+            return
+        }
+
+        File(DEFAULT_GAMES_DIRECTORY).mkdirs()
+        withContext(Dispatchers.Main) {
+            val job = gamesViewModel.addFolder(GameDir(DEFAULT_GAMES_DIRECTORY, true))
+            job.join()
+
+            val defaultDirConfigured = NativeConfig.getGameDirs().any {
+                it.uriString == DEFAULT_GAMES_DIRECTORY
+            }
+            if (defaultDirConfigured) {
+                NativeConfig.saveGlobalConfig()
+                homeViewModel.setGamesDirSelected(true)
+            }
+        }
+    }
+
+    private fun applyDefaultLocaleAfterFirmwareInstall() {
+        IntSetting.REGION_INDEX.setInt(DEFAULT_REGION_CHINA)
+        IntSetting.LANGUAGE_INDEX.setInt(DEFAULT_LANGUAGE_SIMPLIFIED_CHINESE)
+        NativeConfig.saveGlobalConfig()
     }
 
     fun pageForward() {

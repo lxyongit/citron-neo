@@ -26,6 +26,7 @@
     <string name="add_games">Add Games</string>
     <string name="add_games_description">Select your games folder</string>
     <string name="step_complete">Complete!</string>
+    <string name="installing">Installing…</string>
 
     <!-- Home strings -->
     <string name="home_games">Games</string>
@@ -53,9 +54,13 @@
     <string name="install_prod_keys_warning_help">https://discord.gg/axqZFEyzPQ</string>
     <string name="notifications">Notifications</string>
     <string name="notifications_description">Grant the notification permission with the button below.</string>
+    <string name="permissions">Permissions</string>
     <string name="give_permission">Grant permission</string>
     <string name="notification_warning">Skip granting the notification permission?</string>
     <string name="notification_warning_description">citron won\'t be able to notify you of important information.</string>
+    <string name="all_files_access">All files access</string>
+    <string name="all_files_access_description">Grant all-files access so citron can import keys, firmware, and your default games folder automatically.</string>
+    <string name="all_files_permission_required">All-files access is required before citron can auto-configure firmware, keys, and the default games directory.</string>
     <string name="permission_denied">Permission denied</string>
     <string name="permission_denied_description">You denied this permission too many times and now you have to manually grant it in system settings.</string>
     <string name="about">About</string>

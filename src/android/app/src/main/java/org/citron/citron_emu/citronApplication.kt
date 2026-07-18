@@ -14,7 +14,9 @@ import org.citron.citron_emu.utils.DocumentsTree
 import org.citron.citron_emu.utils.GpuDriverHelper
 import org.citron.citron_emu.utils.Log
 
-fun Context.getPublicFilesDir(): File = getExternalFilesDir(null) ?: filesDir
+fun Context.getPublicFilesDir(): File = File(DirectoryInitialization.USER_ROOT_DIRECTORY).apply {
+    mkdirs()
+}
 
 class CitronApplication : Application() {
     private fun createNotificationChannels() {
