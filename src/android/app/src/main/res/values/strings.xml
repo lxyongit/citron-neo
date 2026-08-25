@@ -27,6 +27,7 @@
     <string name="add_games_description">Select your games folder</string>
     <string name="step_complete">Complete!</string>
     <string name="installing">Installing…</string>
+    <string name="downloading">Downloading…</string>
 
     <!-- Home strings -->
     <string name="home_games">Games</string>

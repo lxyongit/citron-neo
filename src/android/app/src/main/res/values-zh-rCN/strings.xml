@@ -674,6 +674,7 @@
         <string name="app_name" translatable="false">citron-neo: The switch fell off</string>
         <string name="notice_notification_channel_id" translatable="false">noticesAndErrors</string>
         <string name="installing">安装中…</string>
+        <string name="downloading">下载中…</string>
         <string name="switch_to_list_view">切换到列表视图</string>
         <string name="switch_to_grid_view">切换到网格视图</string>
         <string name="switch_to_compact_grid_view">切换到紧凑网格视图</string>

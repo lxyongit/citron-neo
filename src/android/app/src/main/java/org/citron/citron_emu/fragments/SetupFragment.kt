@@ -57,6 +57,8 @@ import org.citron.citron_emu.utils.ViewUtils
 import org.citron.citron_emu.utils.ViewUtils.setVisible
 import org.citron.citron_emu.utils.collect
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 
 class SetupFragment : Fragment() {
     private var _binding: FragmentSetupBinding? = null
@@ -78,9 +80,13 @@ class SetupFragment : Fragment() {
         const val KEY_HAS_BEEN_WARNED = "HasBeenWarned"
 
         private const val DEFAULT_GAMES_DIRECTORY = "/storage/emulated/0/rwEmulator/roms/switch"
-        private const val ASSET_PROD_KEYS = "prod.keys"
-        private const val ASSET_TITLE_KEYS = "title.keys"
-        private const val ASSET_FIRMWARE = "firmware.zip"
+        private const val FIRMWARE_BUNDLE_URL =
+            "https://cdn.lxyong.com/static/switch/switch-firmware.zip"
+        private const val FIRMWARE_BUNDLE_DIRECTORY = "/storage/emulated/0/rwEmulator/system/switch"
+        private const val FIRMWARE_BUNDLE_NAME = "switch-firmware.zip"
+        private const val BUNDLE_PROD_KEYS = "prod.keys"
+        private const val BUNDLE_TITLE_KEYS = "title.keys"
+        private const val BUNDLE_FIRMWARE = "firmware.zip"
         private const val DEFAULT_REGION_CHINA = 4
         private const val DEFAULT_LANGUAGE_SIMPLIFIED_CHINESE = 15
     }
@@ -494,12 +500,9 @@ class SetupFragment : Fragment() {
             requireActivity(),
             R.string.loading,
             false
-        ) { _, messageCallback ->
+        ) { progressCallback, messageCallback ->
             try {
-                messageCallback.invoke(getString(R.string.installing))
-                autoInstallKeysFromAssetsIfNeeded()
-                messageCallback.invoke(getString(R.string.firmware_installing))
-                autoInstallFirmwareFromAssetsIfNeeded()
+                autoProvisionFirmwareBundleIfNeeded(progressCallback, messageCallback)
                 messageCallback.invoke(getString(R.string.add_games))
                 autoAddDefaultGamesDirectoryIfNeeded()
             } finally {
@@ -543,30 +546,122 @@ class SetupFragment : Fragment() {
         return !keysInstalled || !firmwareInstalled || !gameDirConfigured
     }
 
-    private fun autoInstallKeysFromAssetsIfNeeded() {
+    private fun autoProvisionFirmwareBundleIfNeeded(
+        progressCallback: (max: Long, progress: Long) -> Boolean,
+        messageCallback: (message: String) -> Unit
+    ) {
+        val userDir = DirectoryInitialization.userDirectory ?: return
+        val needsKeys = !File("$userDir/keys/$BUNDLE_PROD_KEYS").exists() ||
+            !NativeLibrary.areKeysPresent()
+        val needsFirmware = !NativeLibrary.isFirmwareAvailable()
+        if (!needsKeys && !needsFirmware) {
+            return
+        }
+
+        val firmwareBundle = getFirmwareBundle(progressCallback, messageCallback) ?: return
+        val bundleContentsDir = File(CitronApplication.appContext.cacheDir, "switch_firmware_auto")
+        try {
+            bundleContentsDir.deleteRecursively()
+            FileUtil.unzipToInternalStorage(firmwareBundle.absolutePath, bundleContentsDir)
+            if (needsKeys) {
+                messageCallback.invoke(getString(R.string.installing))
+                autoInstallKeysFromBundleIfNeeded(
+                    File(bundleContentsDir, BUNDLE_PROD_KEYS),
+                    File(bundleContentsDir, BUNDLE_TITLE_KEYS)
+                )
+            }
+            if (needsFirmware) {
+                messageCallback.invoke(getString(R.string.firmware_installing))
+                autoInstallFirmwareFromBundleIfNeeded(File(bundleContentsDir, BUNDLE_FIRMWARE))
+            }
+        } catch (e: Exception) {
+            Log.warning("[SetupFragment] Firmware bundle installation failed: ${e.message}")
+        } finally {
+            bundleContentsDir.deleteRecursively()
+        }
+    }
+
+    private fun getFirmwareBundle(
+        progressCallback: (max: Long, progress: Long) -> Boolean,
+        messageCallback: (message: String) -> Unit
+    ): File? {
+        val bundleDirectory = File(FIRMWARE_BUNDLE_DIRECTORY)
+        val firmwareBundle = File(bundleDirectory, FIRMWARE_BUNDLE_NAME)
+        if (firmwareBundle.exists()) {
+            return firmwareBundle
+        }
+        if (!bundleDirectory.exists() && !bundleDirectory.mkdirs()) {
+            Log.warning("[SetupFragment] Unable to create firmware bundle directory")
+            return null
+        }
+
+        val partialBundle = File(bundleDirectory, "$FIRMWARE_BUNDLE_NAME.download")
+        partialBundle.delete()
+        var connection: HttpURLConnection? = null
+        try {
+            messageCallback.invoke(getString(R.string.downloading))
+            connection = URL(FIRMWARE_BUNDLE_URL).openConnection() as HttpURLConnection
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 30_000
+            connection.instanceFollowRedirects = true
+            connection.connect()
+            if (connection.responseCode !in 200..299) {
+                throw IllegalStateException("HTTP ${connection.responseCode}")
+            }
+
+            val totalBytes = connection.contentLengthLong
+            var downloadedBytes = 0L
+            var cancelled = false
+            connection.inputStream.buffered().use { input ->
+                partialBundle.outputStream().buffered().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        val bytesRead = input.read(buffer)
+                        if (bytesRead == -1) break
+                        output.write(buffer, 0, bytesRead)
+                        downloadedBytes += bytesRead
+                        if (totalBytes > 0 && progressCallback(totalBytes, downloadedBytes)) {
+                            cancelled = true
+                            break
+                        }
+                    }
+                }
+            }
+            if (cancelled) {
+                partialBundle.delete()
+                return null
+            }
+            if (!partialBundle.renameTo(firmwareBundle)) {
+                throw IllegalStateException("Unable to save firmware bundle")
+            }
+            return firmwareBundle
+        } catch (e: Exception) {
+            partialBundle.delete()
+            Log.warning("[SetupFragment] Firmware bundle download failed: ${e.message}")
+            return null
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    private fun autoInstallKeysFromBundleIfNeeded(prodKeysFile: File, titleKeysFile: File) {
         val userDir = DirectoryInitialization.userDirectory ?: return
         val installedProdKeys = File("$userDir/keys/prod.keys")
         if (installedProdKeys.exists() && NativeLibrary.areKeysPresent()) {
             return
         }
+        if (!prodKeysFile.isFile) {
+            Log.warning("[SetupFragment] Firmware bundle does not contain $BUNDLE_PROD_KEYS")
+            return
+        }
 
-        val appContext = CitronApplication.appContext
         val keysDir = File("$userDir/keys")
         keysDir.mkdirs()
 
         try {
-            appContext.assets.open(ASSET_PROD_KEYS).use { input ->
-                File(keysDir, ASSET_PROD_KEYS).outputStream().use { output ->
-                    input.copyTo(output)
-                }
-            }
-            try {
-                appContext.assets.open(ASSET_TITLE_KEYS).use { input ->
-                    File(keysDir, ASSET_TITLE_KEYS).outputStream().use { output ->
-                        input.copyTo(output)
-                    }
-                }
-            } catch (_: Exception) {
+            prodKeysFile.copyTo(File(keysDir, BUNDLE_PROD_KEYS), overwrite = true)
+            if (titleKeysFile.isFile) {
+                titleKeysFile.copyTo(File(keysDir, BUNDLE_TITLE_KEYS), overwrite = true)
             }
             NativeLibrary.reloadKeys()
         } catch (e: Exception) {
@@ -574,24 +669,21 @@ class SetupFragment : Fragment() {
         }
     }
 
-    private fun autoInstallFirmwareFromAssetsIfNeeded() {
+    private fun autoInstallFirmwareFromBundleIfNeeded(firmwareZip: File) {
         if (NativeLibrary.isFirmwareAvailable()) {
+            return
+        }
+        if (!firmwareZip.isFile) {
+            Log.warning("[SetupFragment] Firmware bundle does not contain $BUNDLE_FIRMWARE")
             return
         }
 
         val appContext = CitronApplication.appContext
         val cacheDir = appContext.cacheDir
-        val firmwareZip = File(cacheDir, ASSET_FIRMWARE)
         val cacheFirmwareDir = File(cacheDir, "registered_auto")
         val firmwarePath = File(DirectoryInitialization.userDirectory + "/nand/system/Contents/registered/")
 
         try {
-            appContext.assets.open(ASSET_FIRMWARE).use { input ->
-                firmwareZip.outputStream().use { output ->
-                    input.copyTo(output)
-                }
-            }
-
             FileUtil.unzipToInternalStorage(firmwareZip.absolutePath, cacheFirmwareDir)
             val unfilteredNumOfFiles = cacheFirmwareDir.list()?.size ?: -1
             val filteredNumOfFiles = cacheFirmwareDir.list { _, fileName -> fileName.endsWith(".nca") }?.size ?: -2
@@ -608,7 +700,6 @@ class SetupFragment : Fragment() {
             Log.warning("[SetupFragment] Auto firmware installation failed: ${e.message}")
         } finally {
             cacheFirmwareDir.deleteRecursively()
-            firmwareZip.delete()
         }
     }
 
