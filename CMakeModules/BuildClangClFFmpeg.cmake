@@ -115,6 +115,7 @@ function(citron_build_clangcl_ffmpeg)
 
     set(_ffmpeg_configure_command
         "export PATH='${_clangcl_tool_dir_msys}:${_linker_tool_dir_msys}:${_ar_tool_dir_msys}':$PATH &&"
+        "unset MSYS2_ARG_CONV_EXCL &&"
         "'${_source_dir_win}/configure'"
         "--toolchain=msvc"
         "--cc=clang-cl"
@@ -180,9 +181,9 @@ function(citron_build_clangcl_ffmpeg)
         COMMAND "${CMAKE_COMMAND}" -E env "MSYS2_ARG_CONV_EXCL=*"
             "${BASH_PROGRAM}" -lc "FFMPEG_SOURCE_DIR_MSYS='${_source_dir_msys}' FFMPEG_SOURCE_DIR_WIN='${_source_dir_win}' FFMPEG_BUILD_DIR_MSYS='${_build_dir_msys}' FFMPEG_BUILD_DIR_WIN='${_build_dir_win}' perl -0pi -e 'my $source_dir_msys = \$ENV{FFMPEG_SOURCE_DIR_MSYS}; my $source_dir_win = \$ENV{FFMPEG_SOURCE_DIR_WIN}; my $build_dir_msys = \$ENV{FFMPEG_BUILD_DIR_MSYS}; my $build_dir_win = \$ENV{FFMPEG_BUILD_DIR_WIN}; if (\$ARGV =~ /config\\.mak$/) { (my $source_dir_make = $source_dir_win) =~ s{ }{\\\\ }g; (my $build_dir_make = $build_dir_win) =~ s{ }{\\\\ }g; s{\\Q$source_dir_msys\\E}{$source_dir_make}g; s{\\Q$build_dir_msys\\E}{$build_dir_make}g; s{^SRC_PATH\\s*:?=\\s*.*$}{SRC_PATH=$source_dir_make}mg; } else { (my $source_dir_sh = $source_dir_win) =~ s{\\x27}{\"\\x27\\\\\\x27\\x27\"}ge; (my $build_dir_sh = $build_dir_win) =~ s{\\x27}{\"\\x27\\\\\\x27\\x27\"}ge; s{\\Q$source_dir_msys\\E}{$source_dir_sh}g; s{\\Q$build_dir_msys\\E}{$build_dir_sh}g; s{^SRC_PATH\\s*:?=\\s*.*$}{\"SRC_PATH=\\x27$source_dir_sh\\x27\"}mge; } s{^(AR|AR_CMD)=llvm-lib}{$1=llvm-ar}mg' '${_build_dir_win}/ffbuild/config.mak' '${_build_dir_win}/ffbuild/config.sh'"
         COMMAND "${CMAKE_COMMAND}" -E env "MSYS2_ARG_CONV_EXCL=*"
-            "${BASH_PROGRAM}" -lc "export PATH='${_clangcl_tool_dir_msys}:${_linker_tool_dir_msys}:${_ar_tool_dir_msys}':$PATH && '${MAKE_PROGRAM}' -j${_ffmpeg_jobs}"
+            "${BASH_PROGRAM}" -lc "export PATH='${_clangcl_tool_dir_msys}:${_linker_tool_dir_msys}:${_ar_tool_dir_msys}':$PATH && unset MSYS2_ARG_CONV_EXCL && '${MAKE_PROGRAM}' -j${_ffmpeg_jobs}"
         COMMAND "${CMAKE_COMMAND}" -E env "MSYS2_ARG_CONV_EXCL=*"
-            "${BASH_PROGRAM}" -lc "export PATH='${_clangcl_tool_dir_msys}:${_linker_tool_dir_msys}:${_ar_tool_dir_msys}':$PATH && '${MAKE_PROGRAM}' install"
+            "${BASH_PROGRAM}" -lc "export PATH='${_clangcl_tool_dir_msys}:${_linker_tool_dir_msys}:${_ar_tool_dir_msys}':$PATH && unset MSYS2_ARG_CONV_EXCL && '${MAKE_PROGRAM}' install"
         COMMAND "${CMAKE_COMMAND}" -E env "MSYS2_ARG_CONV_EXCL=*"
             "${BASH_PROGRAM}" -lc
             "cd '${_install_dir_msys}/lib' && for f in avfilter swscale avcodec avutil; do if [ -f \"lib$f.a\" ]; then mv -f \"lib$f.a\" \"$f.lib\" || exit 1; elif [ ! -f \"$f.lib\" ]; then echo \"[FFmpeg/clang-cl] Missing both lib$f.a and $f.lib after make install\" >&2; exit 1; fi; done"

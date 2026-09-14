@@ -147,6 +147,7 @@ function(citron_build_clangtron_ffmpeg)
 
     set(_ffmpeg_configure_command
         "export PATH='${_clangtron_tool_dir_msys}':$PATH &&"
+        "unset MSYS2_ARG_CONV_EXCL &&"
         "'${_source_dir_win}/configure'"
         "--arch=x86_64"
         "--target-os=mingw32"
@@ -223,9 +224,9 @@ function(citron_build_clangtron_ffmpeg)
         COMMAND "${CMAKE_COMMAND}" -E env "MSYS2_ARG_CONV_EXCL=*"
             "${BASH_PROGRAM}" -lc "${_ffmpeg_configure_run_command}"
         COMMAND "${CMAKE_COMMAND}" -E env "MSYS2_ARG_CONV_EXCL=*"
-            "${BASH_PROGRAM}" -lc "export PATH='${_clangtron_tool_dir_msys}':$PATH && '${MAKE_PROGRAM}' -j${_ffmpeg_jobs}"
+            "${BASH_PROGRAM}" -lc "export PATH='${_clangtron_tool_dir_msys}':$PATH && unset MSYS2_ARG_CONV_EXCL && '${MAKE_PROGRAM}' -j${_ffmpeg_jobs}"
         COMMAND "${CMAKE_COMMAND}" -E env "MSYS2_ARG_CONV_EXCL=*"
-            "${BASH_PROGRAM}" -lc "export PATH='${_clangtron_tool_dir_msys}':$PATH && '${MAKE_PROGRAM}' install"
+            "${BASH_PROGRAM}" -lc "export PATH='${_clangtron_tool_dir_msys}':$PATH && unset MSYS2_ARG_CONV_EXCL && '${MAKE_PROGRAM}' install"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${_ffmpeg_flags_sentinel_staged}" "${_ffmpeg_flags_sentinel}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_build_stamp}"
