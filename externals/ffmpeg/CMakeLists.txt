@@ -67,6 +67,15 @@ if (NOT WIN32 AND NOT ANDROID)
     set(FFmpeg_HWACCEL_FLAGS)
     set(FFmpeg_HWACCEL_INCLUDE_DIRS)
     set(FFmpeg_HWACCEL_LDFLAGS)
+    set(FFmpeg_PLATFORM_LIBRARIES)
+
+    # FFmpeg's subtitle decoder uses iconv when it is available during
+    # configuration. Because FFmpeg is linked statically, macOS consumers must
+    # also link libiconv explicitly.
+    if (APPLE)
+        find_package(Iconv REQUIRED)
+        list(APPEND FFmpeg_PLATFORM_LIBRARIES Iconv::Iconv)
+    endif()
 
     if(LIBVA_FOUND)
         pkg_check_modules(LIBDRM libdrm REQUIRED)
@@ -271,13 +280,17 @@ if (NOT WIN32 AND NOT ANDROID)
     add_custom_target(ffmpeg-configure ALL DEPENDS ${FFmpeg_MAKEFILE})
     add_custom_target(ffmpeg-build ALL DEPENDS ${FFmpeg_BUILD_LIBRARIES} ffmpeg-configure)
     link_libraries(${FFmpeg_LIBVA_LIBRARIES})
-    set(FFmpeg_LIBRARIES ${FFmpeg_BUILD_LIBRARIES} ${FFmpeg_HWACCEL_LIBRARIES}
+    set(FFmpeg_LIBRARIES
+        ${FFmpeg_BUILD_LIBRARIES}
+        ${FFmpeg_HWACCEL_LIBRARIES}
+        ${FFmpeg_PLATFORM_LIBRARIES}
         CACHE PATH "Paths to FFmpeg libraries" FORCE)
     unset(FFmpeg_BUILD_LIBRARIES)
     unset(FFmpeg_HWACCEL_FLAGS)
     unset(FFmpeg_HWACCEL_INCLUDE_DIRS)
     unset(FFmpeg_HWACCEL_LDFLAGS)
     unset(FFmpeg_HWACCEL_LIBRARIES)
+    unset(FFmpeg_PLATFORM_LIBRARIES)
 
     if (FFmpeg_FOUND)
         message(STATUS "Found FFmpeg version ${FFmpeg_VERSION}")

@@ -37,6 +37,7 @@ jobs:
           update: true
           install: >-
             base-devel
+            mingw-w64-clang-x86_64-autotools
             git
             curl
             wget
