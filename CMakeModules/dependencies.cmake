@@ -481,8 +481,10 @@ endif()
 if (ENABLE_LIBUSB AND NOT TARGET libusb::usb)
     CPMAddPackage(
         NAME libusb_src
-        GITHUB_REPOSITORY libusb/libusb
-        GIT_TAG v1.0.27
+        # Use libusb's official release archive. Unlike GitHub's generated
+        # source snapshot, it includes the generated configure script and does
+        # not require autoreconf during a native MSYS2 build.
+        URL https://github.com/libusb/libusb/releases/download/v1.0.27/libusb-1.0.27.tar.bz2
         DOWNLOAD_ONLY YES
     )
     if (libusb_src_ADDED)

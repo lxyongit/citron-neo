@@ -12,20 +12,23 @@ endif()
 
 if (MINGW OR (${CMAKE_SYSTEM_NAME} MATCHES "Linux") OR APPLE)
     set(LIBUSB_FOUND ON CACHE BOOL "libusb is present" FORCE)
-    set(LIBUSB_VERSION "1.0.24" CACHE STRING "libusb version string" FORCE)
+    set(LIBUSB_VERSION "1.0.27" CACHE STRING "libusb version string" FORCE)
 
     # GNU toolchains for some reason doesn't work with the later half of this CMakeLists after
     # updating to 1.0.24, so we do it the old-fashioned way for now.
 
-    # Require autoconf and libtoolize here, rather than crash during compilation
-    find_program(AUTOCONF autoconf)
-    if ("${AUTOCONF}" STREQUAL "AUTOCONF-NOTFOUND")
-        message(FATAL_ERROR "Required program `autoconf` not found.")
-    endif()
+    # Official libusb release archives contain configure. Only a Git checkout
+    # or generated source snapshot needs the Autotools bootstrap programs.
+    if (NOT EXISTS "${LIBUSB_SRC_DIR}/configure")
+        find_program(AUTOCONF autoconf)
+        if ("${AUTOCONF}" STREQUAL "AUTOCONF-NOTFOUND")
+            message(FATAL_ERROR "Required program `autoconf` not found.")
+        endif()
 
-    find_program(LIBTOOLIZE libtoolize)
-    if ("${LIBTOOLIZE}" STREQUAL "LIBTOOLIZE-NOTFOUND")
-        message(FATAL_ERROR "Required program `libtoolize` not found.")
+        find_program(LIBTOOLIZE libtoolize)
+        if ("${LIBTOOLIZE}" STREQUAL "LIBTOOLIZE-NOTFOUND")
+            message(FATAL_ERROR "Required program `libtoolize` not found.")
+        endif()
     endif()
 
     set(LIBUSB_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/libusb")
@@ -74,38 +77,98 @@ if (MINGW OR (${CMAKE_SYSTEM_NAME} MATCHES "Linux") OR APPLE)
 
     make_directory("${LIBUSB_PREFIX}")
 
-    add_custom_command(
-        OUTPUT
-            "${LIBUSB_LIBRARIES}"
-        COMMAND
-            make
-        WORKING_DIRECTORY
-            "${LIBUSB_PREFIX}"
-    )
+    if (CMAKE_HOST_WIN32)
+        # Native CMake/Ninja would otherwise launch MSYS tools through cmd.exe,
+        # which corrupts relocated runner paths such as D:/a/_temp/msys64.
+        # Enter MSYS Bash explicitly and let it convert POSIX source paths for
+        # the native clang executable.
+        find_program(BASH_PROGRAM bash REQUIRED)
+        get_filename_component(_libusb_compiler_dir "${CMAKE_C_COMPILER}" DIRECTORY)
+        get_filename_component(_libusb_compiler_name "${CMAKE_C_COMPILER}" NAME)
+        get_filename_component(_libusb_cxx_compiler_name "${CMAKE_CXX_COMPILER}" NAME)
+        execute_process(
+            COMMAND "${CMAKE_COMMAND}" -E env "MSYS2_ARG_CONV_EXCL=*"
+                "${BASH_PROGRAM}" -lc
+                "cygpath -au '${LIBUSB_SRC_DIR}' && cygpath -au '${LIBUSB_PREFIX}' && cygpath -au '${_libusb_compiler_dir}'"
+            OUTPUT_VARIABLE _libusb_msys_paths
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            COMMAND_ERROR_IS_FATAL ANY
+        )
+        string(REPLACE "\n" ";" _libusb_msys_paths "${_libusb_msys_paths}")
+        list(GET _libusb_msys_paths 0 _libusb_src_msys)
+        list(GET _libusb_msys_paths 1 _libusb_prefix_msys)
+        list(GET _libusb_msys_paths 2 _libusb_compiler_dir_msys)
 
-    add_custom_command(
-        OUTPUT
-            "${LIBUSB_MAKEFILE}"
-        COMMAND
-            env
-                CC="${CMAKE_C_COMPILER}"
-                CXX="${CMAKE_CXX_COMPILER}"
-                CFLAGS="${LIBUSB_CFLAGS}"
-            sh "${LIBUSB_CONFIGURE}"
-                ${LIBUSB_CONFIGURE_ARGS}
-                --srcdir="${LIBUSB_SRC_DIR}"
-        WORKING_DIRECTORY
-            "${LIBUSB_PREFIX}"
-    )
+        set(_libusb_configure_command
+            "export PATH='${_libusb_compiler_dir_msys}':$PATH &&"
+            "unset MSYS2_ARG_CONV_EXCL &&"
+            "cd '${_libusb_prefix_msys}' &&"
+            "CC='${_libusb_compiler_name}'"
+            "CXX='${_libusb_cxx_compiler_name}'"
+            "CFLAGS='${LIBUSB_CFLAGS}'"
+            "'${_libusb_src_msys}/configure'"
+            ${LIBUSB_CONFIGURE_ARGS}
+            "--srcdir='${_libusb_src_msys}'"
+        )
+        string(JOIN " " _libusb_configure_command ${_libusb_configure_command})
 
-    add_custom_command(
-        OUTPUT
-            "${LIBUSB_CONFIGURE}"
-        COMMAND
-            sh "${LIBUSB_SRC_DIR}/bootstrap.sh"
-        WORKING_DIRECTORY
-            "${LIBUSB_SRC_DIR}"
-    )
+        add_custom_command(
+            OUTPUT "${LIBUSB_LIBRARIES}"
+            COMMAND "${CMAKE_COMMAND}" -E env "MSYS2_ARG_CONV_EXCL=*"
+                "${BASH_PROGRAM}" -lc
+                "export PATH='${_libusb_compiler_dir_msys}':$PATH && unset MSYS2_ARG_CONV_EXCL && cd '${_libusb_prefix_msys}' && make"
+            WORKING_DIRECTORY "${LIBUSB_PREFIX}"
+            VERBATIM
+        )
+
+        add_custom_command(
+            OUTPUT "${LIBUSB_MAKEFILE}"
+            COMMAND "${CMAKE_COMMAND}" -E env "MSYS2_ARG_CONV_EXCL=*"
+                "${BASH_PROGRAM}" -lc "${_libusb_configure_command}"
+            DEPENDS "${LIBUSB_CONFIGURE}"
+            WORKING_DIRECTORY "${LIBUSB_PREFIX}"
+            VERBATIM
+        )
+    else()
+        add_custom_command(
+            OUTPUT "${LIBUSB_LIBRARIES}"
+            COMMAND make
+            WORKING_DIRECTORY "${LIBUSB_PREFIX}"
+        )
+
+        add_custom_command(
+            OUTPUT "${LIBUSB_MAKEFILE}"
+            COMMAND
+                env
+                    CC="${CMAKE_C_COMPILER}"
+                    CXX="${CMAKE_CXX_COMPILER}"
+                    CFLAGS="${LIBUSB_CFLAGS}"
+                sh "${LIBUSB_CONFIGURE}"
+                    ${LIBUSB_CONFIGURE_ARGS}
+                    --srcdir="${LIBUSB_SRC_DIR}"
+            DEPENDS "${LIBUSB_CONFIGURE}"
+            WORKING_DIRECTORY "${LIBUSB_PREFIX}"
+        )
+    endif()
+
+    if (NOT EXISTS "${LIBUSB_CONFIGURE}")
+        if (CMAKE_HOST_WIN32)
+            add_custom_command(
+                OUTPUT "${LIBUSB_CONFIGURE}"
+                COMMAND "${CMAKE_COMMAND}" -E env "MSYS2_ARG_CONV_EXCL=*"
+                    "${BASH_PROGRAM}" -lc
+                    "unset MSYS2_ARG_CONV_EXCL && cd '${_libusb_src_msys}' && ./bootstrap.sh"
+                WORKING_DIRECTORY "${LIBUSB_SRC_DIR}"
+                VERBATIM
+            )
+        else()
+            add_custom_command(
+                OUTPUT "${LIBUSB_CONFIGURE}"
+                COMMAND sh "${LIBUSB_SRC_DIR}/bootstrap.sh"
+                WORKING_DIRECTORY "${LIBUSB_SRC_DIR}"
+            )
+        endif()
+    endif()
 
     add_custom_target(usb-bootstrap DEPENDS "${LIBUSB_CONFIGURE}")
     add_custom_target(usb-configure DEPENDS "${LIBUSB_MAKEFILE}" usb-bootstrap)
