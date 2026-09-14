@@ -93,6 +93,21 @@ function(citron_build_clangtron_ffmpeg)
         set(_install_dir_msys "${_install_dir}")
     endif()
 
+    # The configure script runs inside MSYS2 Bash. On a native Windows host,
+    # invoke clang by its filename through the tool directory prepended to PATH;
+    # a CMake-style D:/... mixed path is not a reliable shell command name.
+    if(CMAKE_HOST_WIN32)
+        get_filename_component(_c_compiler_shell "${_c_compiler_win}" NAME)
+        if(_rc_compiler_win)
+            get_filename_component(_rc_compiler_shell "${_rc_compiler_win}" NAME)
+        else()
+            set(_rc_compiler_shell "")
+        endif()
+    else()
+        set(_c_compiler_shell "${_c_compiler_win}")
+        set(_rc_compiler_shell "${_rc_compiler_win}")
+    endif()
+
     set(_build_stamp "${_install_dir}/.built")
     file(MAKE_DIRECTORY "${_build_dir}" "${_install_dir}")
 
@@ -135,7 +150,7 @@ function(citron_build_clangtron_ffmpeg)
         "'${_source_dir_win}/configure'"
         "--arch=x86_64"
         "--target-os=mingw32"
-        "--cc='${_c_compiler_win}'"
+        "--cc='${_c_compiler_shell}'"
         "--ar=llvm-ar"
         "--nm=llvm-nm"
         "--strip=llvm-strip"
@@ -162,14 +177,14 @@ function(citron_build_clangtron_ffmpeg)
     )
     list(APPEND _ffmpeg_configure_command ${_ffmpeg_vulkan_flags})
 
-    if(_rc_compiler_win AND NOT _rc_compiler_win STREQUAL "")
-        list(APPEND _ffmpeg_configure_command "--windres='${_rc_compiler_win}'")
+    if(_rc_compiler_shell AND NOT _rc_compiler_shell STREQUAL "")
+        list(APPEND _ffmpeg_configure_command "--windres='${_rc_compiler_shell}'")
     endif()
 
     if(NOT CMAKE_HOST_WIN32)
         list(APPEND _ffmpeg_configure_command "--enable-cross-compile" "--cross-prefix=${_clangtron_tool_dir_msys}/x86_64-w64-mingw32-")
     else()
-        list(APPEND _ffmpeg_configure_command "--host-cc='${_c_compiler_win}'")
+        list(APPEND _ffmpeg_configure_command "--host-cc='${_c_compiler_shell}'")
     endif()
 
     if(NOT "${_ffmpeg_extra_cflags}" STREQUAL "")
@@ -193,6 +208,9 @@ function(citron_build_clangtron_ffmpeg)
     endif()
     file(WRITE "${_ffmpeg_flags_sentinel_staged}" "${_ffmpeg_configure_command}")
 
+    set(_ffmpeg_configure_run_command
+        "${_ffmpeg_configure_command} || (tail -n 200 ffbuild/config.log && false)")
+
     add_custom_command(
         OUTPUT "${_build_stamp}"
         BYPRODUCTS
@@ -203,7 +221,7 @@ function(citron_build_clangtron_ffmpeg)
             "${_install_dir}/lib/libavutil.a"
             "${_install_dir}/lib/libavformat.a"
         COMMAND "${CMAKE_COMMAND}" -E env "MSYS2_ARG_CONV_EXCL=*"
-            "${BASH_PROGRAM}" -lc "${_ffmpeg_configure_command}"
+            "${BASH_PROGRAM}" -lc "${_ffmpeg_configure_run_command}"
         COMMAND "${CMAKE_COMMAND}" -E env "MSYS2_ARG_CONV_EXCL=*"
             "${BASH_PROGRAM}" -lc "export PATH='${_clangtron_tool_dir_msys}':$PATH && '${MAKE_PROGRAM}' -j${_ffmpeg_jobs}"
         COMMAND "${CMAKE_COMMAND}" -E env "MSYS2_ARG_CONV_EXCL=*"

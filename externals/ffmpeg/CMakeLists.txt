@@ -74,7 +74,10 @@ if (NOT WIN32 AND NOT ANDROID)
     # also link libiconv explicitly.
     if (APPLE)
         find_package(Iconv REQUIRED)
-        list(APPEND FFmpeg_PLATFORM_LIBRARIES Iconv::Iconv)
+        # Imported targets created in this subdirectory are not visible from
+        # the sibling video_core directory. Export the resolved library path
+        # instead of the directory-scoped Iconv::Iconv target name.
+        list(APPEND FFmpeg_PLATFORM_LIBRARIES ${Iconv_LIBRARIES})
     endif()
 
     if(LIBVA_FOUND)
