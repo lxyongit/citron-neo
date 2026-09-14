@@ -1599,6 +1599,7 @@ build_common_cmake_args() {
         "-DCITRON_ENABLE_LTO=${lto_flag}"
         "-DBUILD_TESTING=OFF"
         "-DCITRON_TESTS=OFF"
+        "-DENABLE_QT_TRANSLATION=ON"
         "-DCITRON_USE_BUNDLED_FFMPEG=ON"
         "-DCITRON_CLANGTRON=ON"
         "-DCITRON_USE_EXTERNAL_SDL2=ON"
@@ -1702,12 +1703,13 @@ stage_generate() {
     local aqt_bin
     aqt_bin="$(command -v aqt 2>/dev/null || echo "${HOME}/.local/bin/aqt")"
 
-    if [[ ! -f "${qt_install_dir}/lib/cmake/Qt6/Qt6Config.cmake" ]]; then
-        info "Downloading Qt 6.9.3 Windows/MinGW target (base + multimedia) via aqt..."
+    if [[ ! -f "${qt_install_dir}/lib/cmake/Qt6/Qt6Config.cmake" ||
+          ! -f "${qt_install_dir}/lib/cmake/Qt6LinguistTools/Qt6LinguistToolsConfig.cmake" ]]; then
+        info "Downloading Qt 6.9.3 Windows/MinGW target (base + multimedia + translation tools) via aqt..."
         mkdir -p "${qt_base_dir}"
         "${aqt_bin}" install-qt windows desktop 6.9.3 win64_llvm_mingw \
             --outputdir "${qt_base_dir}" \
-            --modules qtmultimedia qtimageformats \
+            --modules qtmultimedia qtimageformats qttools \
             || error "Qt download failed."
     fi
 
@@ -1715,12 +1717,13 @@ stage_generate() {
     # On Windows, target Qt IS host Qt — do NOT pass QT_HOST_PATH (triggers cross-compile mode).
     # Linux Qt package has Unix symlinks Windows can't create without Developer Mode.
     if [[ "${_HOST_OS}" != "windows" ]]; then
-        if [[ ! -f "${qt_host_dir}/lib/cmake/Qt6/Qt6Config.cmake" ]]; then
+        if [[ ! -f "${qt_host_dir}/lib/cmake/Qt6/Qt6Config.cmake" ||
+              ! -f "${qt_host_dir}/lib/cmake/Qt6LinguistTools/Qt6LinguistToolsConfig.cmake" ]]; then
             local _host_outdir="${CPM_SOURCE_CACHE}/qt-bin-host"
             mkdir -p "${_host_outdir}"
             "${aqt_bin}" install-qt linux desktop 6.9.3 linux_gcc_64 \
                 --outputdir "${_host_outdir}" \
-                --modules qtsvg qtmultimedia \
+                --modules qtsvg qtmultimedia qttools \
                 || warn "aqt Qt 6.9.3 linux download failed"
         fi
     else
@@ -2171,15 +2174,24 @@ stage_use() {
             fi
         fi
 
+        # Older Qt caches may predate desktop translation support and therefore lack qttools.
+        if [[ -n "${qt6_cmake_dir}" ]]; then
+            local _qt_cmake_root
+            _qt_cmake_root="$(dirname "${qt6_cmake_dir}")"
+            if [[ ! -f "${_qt_cmake_root}/Qt6LinguistTools/Qt6LinguistToolsConfig.cmake" ]]; then
+                qt6_cmake_dir=""
+            fi
+        fi
+
         if [[ -z "${qt6_cmake_dir}" ]]; then
             warn "No cached Qt found in generate or prior nopgo build."
-            warn "Downloading Qt (base + multimedia) via aqt into ${_nopgo_qt_base} ..."
+            warn "Downloading Qt (base + multimedia + translation tools) via aqt into ${_nopgo_qt_base} ..."
             ensure_aqt
             local _aqt; _aqt="$(command -v aqt 2>/dev/null || echo "${HOME}/.local/bin/aqt")"
             mkdir -p "${_nopgo_qt_base}"
             "${_aqt}" install-qt windows desktop 6.9.3 win64_llvm_mingw \
                 --outputdir "${_nopgo_qt_base}" \
-                --modules qtmultimedia qtimageformats \
+                --modules qtmultimedia qtimageformats qttools \
                 || error "Qt download failed.\n" \
                          "       Run generate first to cache Qt, then re-run:\n" \
                          "         ./build-clangtron-windows.sh use --pgo none --lto ${LTO_MODE}"
@@ -2560,7 +2572,7 @@ stage_build_elf() {
 
     # Verify required Qt cmake configs are present; wipe and re-download if any are missing.
     local _elf_qt_ok=1
-    for _qtmod in Qt6 Qt6Network Qt6Widgets Qt6Gui Qt6DBus Qt6Svg Qt6OpenGL; do
+    for _qtmod in Qt6 Qt6Network Qt6Widgets Qt6Gui Qt6DBus Qt6Svg Qt6OpenGL Qt6LinguistTools; do
         if [[ ! -f "${elf_qt_dir}/lib/cmake/${_qtmod}/${_qtmod}Config.cmake" ]]; then
             warn "ELF build: missing Qt cmake config: ${_qtmod}Config.cmake"
             _elf_qt_ok=0
@@ -2583,7 +2595,7 @@ stage_build_elf() {
                 break
             fi
         done
-        python3 -m aqt install-qt             --outputdir "${aqt_base_dir}"             linux desktop 6.9.3 linux_gcc_64             --modules qtsvg 2>/dev/null             || warn "aqt qtsvg module install failed (may already be present)"
+        python3 -m aqt install-qt             --outputdir "${aqt_base_dir}"             linux desktop 6.9.3 linux_gcc_64             --modules qtsvg qttools 2>/dev/null             || warn "aqt qtsvg/qttools module install failed (may already be present)"
         if [[ ! -f "${elf_qt_cmake_dir}/Qt6Config.cmake" ]]; then
             warn "ELF build: Qt6Config.cmake still missing after aqt download — check aqt output"
         fi

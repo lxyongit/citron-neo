@@ -58,7 +58,12 @@ cmake_dependent_option(ENABLE_LIBUSB "Enable the use of LibUSB" ON "NOT ANDROID"
 
 option(ENABLE_QT "Enable the Qt frontend" ON)
 
-option(ENABLE_QT_TRANSLATION "Enable translations for the Qt frontend" OFF)
+set(DEFAULT_ENABLE_QT_TRANSLATION OFF)
+if (WIN32 OR APPLE)
+    set(DEFAULT_ENABLE_QT_TRANSLATION ON)
+endif()
+option(ENABLE_QT_TRANSLATION "Enable translations for the Qt frontend" "${DEFAULT_ENABLE_QT_TRANSLATION}")
+unset(DEFAULT_ENABLE_QT_TRANSLATION)
 CMAKE_DEPENDENT_OPTION(CITRON_USE_BUNDLED_QT "Download bundled Qt binaries" "${MSVC}" "ENABLE_QT" OFF)
 
 set(DEFAULT_ENABLE_WEB_SERVICE ON)
