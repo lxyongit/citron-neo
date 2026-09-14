@@ -85,11 +85,9 @@ else()
     if (APPLE)
         set(_QT_OS        "mac")
         set(_QT_TARGET    "desktop")
-        if (ARCHITECTURE_arm64)
-            set(_QT_ARCH  "mac_arm64")
-        else()
-            set(_QT_ARCH  "mac_x64")
-        endif()
+        # Qt's macOS desktop package is a universal binary. aqt names the
+        # architecture clang_64 for both Intel and Apple Silicon hosts.
+        set(_QT_ARCH      "clang_64")
         set(_QT_DIR_NAME  "macos")
         set(_QT_CMAKE_SUB "lib/cmake/Qt6")
     else()
@@ -136,27 +134,26 @@ else()
         message(STATUS "[Qt] Qt ${CITRON_QT_VERSION} target downloaded")
     endif()
 
-    # Download additional modules (imageformats, svg).
+    # QtSvg and Qt6LinguistTools ship in aqt's desktop base archives. They are
+    # archive names, not valid --modules values. qtimageformats is the only
+    # optional module requested here.
     # Note: qtmultimedia is intentionally NOT downloaded here — it isn't used
     # by citron-neo on Qt6+.
     set(_QT_SVG_CMAKE  "${_QT_TARGET_DIR}/lib/cmake/Qt6Svg/Qt6SvgConfig.cmake")
-    # Qt6CoreTools ships with qtbase itself, so it can't be used to detect a
-    # missing qttools module. Qt6LinguistTools is only installed by qttools,
-    # so use that as the presence check instead.
     set(_QT_TOOL_CMAKE "${_QT_TARGET_DIR}/lib/cmake/Qt6LinguistTools/Qt6LinguistToolsConfig.cmake")
     if (NOT EXISTS "${_QT_SVG_CMAKE}" OR NOT EXISTS "${_QT_TOOL_CMAKE}")
-        message(STATUS "[Qt] Downloading Qt ${CITRON_QT_VERSION} additional modules (qttools, qtimageformats, qtsvg)...")
+        message(STATUS "[Qt] Refreshing Qt ${CITRON_QT_VERSION} base archives and image formats...")
         execute_process(
             COMMAND ${_AQT_EXECUTABLE} install-qt
                     ${_QT_OS} ${_QT_TARGET}
                     ${CITRON_QT_VERSION} ${_QT_ARCH}
                     --outputdir "${CITRON_QT_BASE_DIR}"
-                    --modules qttools qtimageformats qtsvg
+                    --modules qtimageformats
             RESULT_VARIABLE _qt_addl_result
             OUTPUT_QUIET ERROR_QUIET
         )
         if (NOT _qt_addl_result EQUAL 0)
-            message(WARNING "[Qt] Additional module install failed (qttools/qtimageformats/qtsvg) — build may fail")
+            message(WARNING "[Qt] Qt base/imageformats refresh failed — build may fail")
         endif()
     endif()
 

@@ -1705,11 +1705,11 @@ stage_generate() {
 
     if [[ ! -f "${qt_install_dir}/lib/cmake/Qt6/Qt6Config.cmake" ||
           ! -f "${qt_install_dir}/lib/cmake/Qt6LinguistTools/Qt6LinguistToolsConfig.cmake" ]]; then
-        info "Downloading Qt 6.9.3 Windows/MinGW target (base + multimedia + translation tools) via aqt..."
+        info "Downloading Qt 6.9.3 Windows/MinGW target (base tools + multimedia + image formats) via aqt..."
         mkdir -p "${qt_base_dir}"
         "${aqt_bin}" install-qt windows desktop 6.9.3 win64_llvm_mingw \
             --outputdir "${qt_base_dir}" \
-            --modules qtmultimedia qtimageformats qttools \
+            --modules qtmultimedia qtimageformats \
             || error "Qt download failed."
     fi
 
@@ -1723,7 +1723,7 @@ stage_generate() {
             mkdir -p "${_host_outdir}"
             "${aqt_bin}" install-qt linux desktop 6.9.3 linux_gcc_64 \
                 --outputdir "${_host_outdir}" \
-                --modules qtsvg qtmultimedia qttools \
+                --modules qtmultimedia \
                 || warn "aqt Qt 6.9.3 linux download failed"
         fi
     else
@@ -2174,7 +2174,9 @@ stage_use() {
             fi
         fi
 
-        # Older Qt caches may predate desktop translation support and therefore lack qttools.
+        # Older Qt caches may predate desktop translation support and therefore lack
+        # Qt6LinguistTools. Qt tools are part of the desktop base archives in aqt,
+        # not an installable module named qttools.
         if [[ -n "${qt6_cmake_dir}" ]]; then
             local _qt_cmake_root
             _qt_cmake_root="$(dirname "${qt6_cmake_dir}")"
@@ -2185,13 +2187,13 @@ stage_use() {
 
         if [[ -z "${qt6_cmake_dir}" ]]; then
             warn "No cached Qt found in generate or prior nopgo build."
-            warn "Downloading Qt (base + multimedia + translation tools) via aqt into ${_nopgo_qt_base} ..."
+            warn "Downloading Qt (base tools + multimedia + image formats) via aqt into ${_nopgo_qt_base} ..."
             ensure_aqt
             local _aqt; _aqt="$(command -v aqt 2>/dev/null || echo "${HOME}/.local/bin/aqt")"
             mkdir -p "${_nopgo_qt_base}"
             "${_aqt}" install-qt windows desktop 6.9.3 win64_llvm_mingw \
                 --outputdir "${_nopgo_qt_base}" \
-                --modules qtmultimedia qtimageformats qttools \
+                --modules qtmultimedia qtimageformats \
                 || error "Qt download failed.\n" \
                          "       Run generate first to cache Qt, then re-run:\n" \
                          "         ./build-clangtron-windows.sh use --pgo none --lto ${LTO_MODE}"
@@ -2595,7 +2597,7 @@ stage_build_elf() {
                 break
             fi
         done
-        python3 -m aqt install-qt             --outputdir "${aqt_base_dir}"             linux desktop 6.9.3 linux_gcc_64             --modules qtsvg qttools 2>/dev/null             || warn "aqt qtsvg/qttools module install failed (may already be present)"
+        python3 -m aqt install-qt             --outputdir "${aqt_base_dir}"             linux desktop 6.9.3 linux_gcc_64             --modules qtimageformats 2>/dev/null             || warn "aqt qtimageformats module install failed (may already be present)"
         if [[ ! -f "${elf_qt_cmake_dir}/Qt6Config.cmake" ]]; then
             warn "ELF build: Qt6Config.cmake still missing after aqt download — check aqt output"
         fi

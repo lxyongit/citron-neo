@@ -81,17 +81,9 @@ jobs:
           retention-days: 14
 
   macos:
-    name: macOS ${{ matrix.arch }}
-    runs-on: ${{ matrix.runner }}
+    name: macOS arm64
+    runs-on: macos-15
     timeout-minutes: 360
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15
-            arch: arm64
-          - runner: macos-15-intel
-            arch: x86_64
 
     steps:
       - name: Check out source
@@ -113,9 +105,10 @@ jobs:
         run: |
           cmake -S . -B build/macos -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCITRON_USE_CPM=ON \
             -DCITRON_USE_BUNDLED_QT=ON \
+            -DUSE_SYSTEM_QT=OFF \
             -DCITRON_USE_BUNDLED_FFMPEG=ON \
             -DCITRON_USE_PRECOMPILED_HEADERS=OFF \
             -DENABLE_QT_TRANSLATION=ON \
@@ -136,13 +129,13 @@ jobs:
           mkdir -p dist-artifacts
           ditto -c -k --sequesterRsrc --keepParent \
             build/macos/bin/citron.app \
-            "dist-artifacts/citron-neo-macos-${{ matrix.arch }}.zip"
+            dist-artifacts/citron-neo-macos-arm64.zip
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v7
         with:
-          name: citron-neo-macos-${{ matrix.arch }}
-          path: dist-artifacts/citron-neo-macos-${{ matrix.arch }}.zip
+          name: citron-neo-macos-arm64
+          path: dist-artifacts/citron-neo-macos-arm64.zip
           archive: false
           if-no-files-found: error
           retention-days: 14
