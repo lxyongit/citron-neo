@@ -1,0 +1,148 @@
+# SPDX-FileCopyrightText: 2026 citron Emulator Project
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: Desktop builds
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 360
+
+    steps:
+      - name: Preserve Unix line endings
+        shell: pwsh
+        run: git config --global core.autocrlf input
+
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up MSYS2 Clang64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          update: true
+          install: >-
+            base-devel
+            git
+            curl
+            wget
+            mingw-w64-clang-x86_64-python-pip
+            mingw-w64-clang-x86_64-python-psutil
+            mingw-w64-clang-x86_64-toolchain
+            mingw-w64-clang-x86_64-cmake
+            mingw-w64-clang-x86_64-ninja
+            mingw-w64-clang-x86_64-python
+            mingw-w64-clang-x86_64-boost
+            mingw-w64-clang-x86_64-SDL2
+            mingw-w64-clang-x86_64-nasm
+            mingw-w64-clang-x86_64-yasm
+            mingw-w64-clang-x86_64-glslang
+
+      - name: Install Qt downloader
+        shell: msys2 {0}
+        run: python3 -m pip install aqtinstall --break-system-packages
+
+      - name: Build Windows release
+        shell: msys2 {0}
+        env:
+          JOBS: "3"
+        run: ./build-clangtron-windows.sh use --pgo-type none --lto none --release
+
+      - name: Package Windows release
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist-artifacts | Out-Null
+          Compress-Archive `
+            -Path build/use-nopgo/bin/* `
+            -DestinationPath dist-artifacts/citron-neo-windows-x64.zip `
+            -CompressionLevel Optimal
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: citron-neo-windows-x64
+          path: dist-artifacts/citron-neo-windows-x64.zip
+          archive: false
+          if-no-files-found: error
+          retention-days: 14
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: |
+          brew install autoconf automake coreutils glslang nasm ninja pkg-config yasm
+          python3 -m pip install aqtinstall
+
+      - name: Configure macOS release
+        env:
+          CPM_SOURCE_CACHE: ${{ runner.temp }}/citron-cpm
+        run: |
+          cmake -S . -B build/macos -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} \
+            -DCITRON_USE_CPM=ON \
+            -DCITRON_USE_BUNDLED_QT=ON \
+            -DCITRON_USE_BUNDLED_FFMPEG=ON \
+            -DCITRON_USE_PRECOMPILED_HEADERS=OFF \
+            -DENABLE_QT_TRANSLATION=ON \
+            -DBUILD_TESTING=OFF \
+            -DCITRON_TESTS=OFF \
+            -DCITRON_SHADER_TOOL=OFF
+
+      - name: Build macOS release
+        run: cmake --build build/macos --target citron --parallel 3
+
+      - name: Deploy and package macOS app
+        env:
+          CPM_SOURCE_CACHE: ${{ runner.temp }}/citron-cpm
+        run: |
+          "${CPM_SOURCE_CACHE}/qt-bin/6.9.3/macos/bin/macdeployqt" \
+            build/macos/bin/citron.app \
+            -always-overwrite
+          mkdir -p dist-artifacts
+          ditto -c -k --sequesterRsrc --keepParent \
+            build/macos/bin/citron.app \
+            "dist-artifacts/citron-neo-macos-${{ matrix.arch }}.zip"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: citron-neo-macos-${{ matrix.arch }}
+          path: dist-artifacts/citron-neo-macos-${{ matrix.arch }}.zip
+          archive: false
+          if-no-files-found: error
+          retention-days: 14
